@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Sanskrit Dictionary Auto-Check",
+  "version": "1.2.0",
+  "description": "Auto-checks dictionary checkboxes and disables auto-search while typing; press Enter to search.",
+  "options_page": "options.html",
+  "permissions": ["storage"],
+  "content_scripts": [
+    {
+      "matches": ["*://sanskrit.myke.blog/*"],
+      "js": ["dictionaries.js", "content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
