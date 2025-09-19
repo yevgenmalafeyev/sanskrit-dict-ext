@@ -872,25 +872,17 @@ function restoreAutoSearch(root) {
         body.appendChild(contentNodes[i]);
       }
 
-      // Only create toggle button if showToggles is enabled or if minimizeLongArticles is enabled
-      if (currentSettings && (currentSettings.showToggles || currentSettings.minimizeLongArticles)) {
-        toggle = document.createElement('button');
-        toggle.type = 'button';
-        toggle.className = 'sd-ext-article-toggle';
-        toggle.textContent = '-';
-        toggle.setAttribute('aria-label', 'Collapse dictionary entry');
-        toggle.setAttribute('aria-expanded', 'true');
-        article.appendChild(toggle);
-      }
-
+      // Don't create toggle here - it will be handled below for consistency
       article.appendChild(body);
       for (var j = 0; j < footerNodes.length; j++) {
         article.appendChild(footerNodes[j]);
       }
     }
 
-    // Show/hide toggle based on settings
-    if (currentSettings && (currentSettings.showToggles || currentSettings.minimizeLongArticles)) {
+    // Check if toggle should be visible based on settings
+    var shouldShowToggle = currentSettings && (currentSettings.showToggles || currentSettings.minimizeLongArticles);
+
+    if (shouldShowToggle) {
       // Make sure toggle exists
       if (!toggle) {
         toggle = document.createElement('button');
@@ -902,15 +894,20 @@ function restoreAutoSearch(root) {
         // Insert toggle as first child
         article.insertBefore(toggle, article.firstChild);
       }
-      if (toggle.style) {
-        toggle.style.display = '';
+      // Make sure toggle is visible
+      if (toggle) {
+        if (toggle.style) {
+          toggle.style.display = '';
+        }
+        // Ensure toggle has event listener
+        ensureToggleHandler(article, toggle);
       }
-      // Ensure toggle has event listener
-      ensureToggleHandler(article, toggle);
     } else {
-      // Hide toggle if it exists
-      if (toggle && toggle.style) {
-        toggle.style.display = 'none';
+      // Hide toggle if it exists or remove it
+      if (toggle) {
+        if (toggle.parentNode) {
+          toggle.parentNode.removeChild(toggle);
+        }
       }
     }
 
