@@ -279,13 +279,28 @@ function restoreAutoSearch(root) {
     }
 
     try {
-      chrome.storage.sync.get(defaults, function (stored) {
+      // Don't pass defaults to chrome.storage.sync.get to avoid automatic merging
+      chrome.storage.sync.get(null, function (stored) {
         var data = stored || {};
         if (chrome.runtime && chrome.runtime.lastError) {
-          data = defaults;
+          data = {};
         }
+
+        // Manually merge with defaults only for missing values
+        var mergedData = {};
+        var keys = Object.keys(defaults);
+        for (var i = 0; i < keys.length; i++) {
+          var key = keys[i];
+          if (data.hasOwnProperty(key)) {
+            mergedData[key] = data[key];
+          } else {
+            mergedData[key] = defaults[key];
+          }
+        }
+
+
         try {
-          updateCurrentSettings(sanitizeSettings(data));
+          updateCurrentSettings(sanitizeSettings(mergedData));
         } catch (_err) {
           updateCurrentSettings(sanitizeSettings(defaults));
         }
@@ -517,7 +532,8 @@ function restoreAutoSearch(root) {
       preselectedDictionaries: defaultSettingsCache.preselectedDictionaries.slice(),
       disableAutosearch: defaultSettingsCache.disableAutosearch,
       mergeResults: defaultSettingsCache.mergeResults,
-      minimizeLongArticles: defaultSettingsCache.minimizeLongArticles
+      minimizeLongArticles: defaultSettingsCache.minimizeLongArticles,
+      showToggles: defaultSettingsCache.showToggles
     };
   }
 
@@ -592,6 +608,7 @@ function restoreAutoSearch(root) {
       minimizeLongArticles: !!newSettings.minimizeLongArticles,
       showToggles: newSettings.showToggles !== undefined ? !!newSettings.showToggles : true
     };
+
 
     if (changed) settingsGeneration += 1;
   }
