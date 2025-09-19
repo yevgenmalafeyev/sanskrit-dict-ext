@@ -592,6 +592,7 @@ function restoreAutoSearch(root) {
       minimizeLongArticles: !!newSettings.minimizeLongArticles,
       showToggles: newSettings.showToggles !== undefined ? !!newSettings.showToggles : true
     };
+
     if (changed) settingsGeneration += 1;
   }
 
