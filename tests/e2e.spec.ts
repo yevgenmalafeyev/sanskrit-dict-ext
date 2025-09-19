@@ -201,39 +201,99 @@ test.describe('Sanskrit Dictionary extension', () => {
 
     await page.waitForSelector('.sd-ext-article');
 
-    const collapsible = await page.$$eval(
+    // Find all collapsible articles (those with > 50 lines)
+    const collapsibleArticles = await page.$$eval(
       '.sd-ext-article',
       (nodes) => nodes
-        .filter((node) => {
-          const lines = Number((node as HTMLElement).dataset.sdLineCount || '0');
-          return lines > 50;
-        })
-        .map((node) => ({
+        .map((node, index) => ({
+          index,
+          lines: Number((node as HTMLElement).dataset.sdLineCount || '0'),
           collapsed: node.classList.contains('sd-ext-article-collapsed'),
           toggleText: (node.querySelector(':scope > .sd-ext-article-toggle') as HTMLElement | null)?.textContent?.trim() || ''
         }))
+        .filter((item) => item.lines > 100)
     );
 
-    const initiallyCollapsed = collapsible.find((item) => item.collapsed);
-    expect(initiallyCollapsed).toBeTruthy();
-    expect(initiallyCollapsed?.toggleText).toBe('+');
+    // Should have at least 2 collapsible articles to test multiple toggles
+    expect(collapsibleArticles.length).toBeGreaterThanOrEqual(2);
 
-    const collapsedIndex = await page.evaluate(() => {
-      const nodes = Array.from(document.querySelectorAll('.sd-ext-article'));
-      return nodes.findIndex((node) => node.classList.contains('sd-ext-article-collapsed'));
+    // Verify initial state - should be collapsed with "+"
+    const initiallyCollapsed = collapsibleArticles.filter(item => item.collapsed);
+    expect(initiallyCollapsed.length).toBeGreaterThan(0);
+    initiallyCollapsed.forEach(item => {
+      expect(item.toggleText).toBe('+');
     });
-    expect(collapsedIndex).toBeGreaterThanOrEqual(0);
 
-    const article = page.locator('.sd-ext-article').nth(collapsedIndex);
-    const toggle = article.locator(':scope > .sd-ext-article-toggle');
-    await toggle.click();
+    // Test multiple articles - at least 3 cycles on 2 different articles
+    const articlesToTest = collapsibleArticles.slice(0, Math.min(3, collapsibleArticles.length));
 
-    await expect(article).not.toHaveClass(/sd-ext-article-collapsed/);
-    await expect(toggle).toHaveText('-');
+    for (const articleInfo of articlesToTest) {
+      const article = page.locator('.sd-ext-article').nth(articleInfo.index);
+      const toggle = article.locator(':scope > .sd-ext-article-toggle');
+      const body = article.locator(':scope > .sd-ext-article-body');
 
-    await toggle.click();
-    await expect(article).toHaveClass(/sd-ext-article-collapsed/);
-    await expect(toggle).toHaveText('+');
+      // Initial state - collapsed
+      await expect(article).toHaveClass(/sd-ext-article-collapsed/);
+      await expect(toggle).toHaveText('+');
+      await expect(body).not.toBeVisible();
+
+      // Test multiple expand/collapse cycles
+      for (let cycle = 0; cycle < 3; cycle++) {
+        // Expand
+        await toggle.click();
+        await expect(article).not.toHaveClass(/sd-ext-article-collapsed/);
+        await expect(toggle).toHaveText('-');
+        await expect(body).toBeVisible();
+
+        // Verify content is actually visible
+        const bodyVisible = await body.isVisible();
+        expect(bodyVisible).toBe(true);
+
+        // Collapse
+        await toggle.click();
+        await expect(article).toHaveClass(/sd-ext-article-collapsed/);
+        await expect(toggle).toHaveText('+');
+        await expect(body).not.toBeVisible();
+
+        // Verify content is actually hidden
+        const bodyHidden = await body.isVisible();
+        expect(bodyHidden).toBe(false);
+      }
+    }
+
+    // Test interleaved operations on multiple articles
+    if (articlesToTest.length >= 2) {
+      const article1 = page.locator('.sd-ext-article').nth(articlesToTest[0].index);
+      const toggle1 = article1.locator(':scope > .sd-ext-article-toggle');
+      const body1 = article1.locator(':scope > .sd-ext-article-body');
+
+      const article2 = page.locator('.sd-ext-article').nth(articlesToTest[1].index);
+      const toggle2 = article2.locator(':scope > .sd-ext-article-toggle');
+      const body2 = article2.locator(':scope > .sd-ext-article-body');
+
+      // Expand both
+      await toggle1.click();
+      await expect(body1).toBeVisible();
+      await toggle2.click();
+      await expect(body2).toBeVisible();
+
+      // Collapse first, second should remain expanded
+      await toggle1.click();
+      await expect(body1).not.toBeVisible();
+      await expect(body2).toBeVisible();
+
+      // Collapse second
+      await toggle2.click();
+      await expect(body2).not.toBeVisible();
+
+      // Expand first again
+      await toggle1.click();
+      await expect(body1).toBeVisible();
+
+      // Final cleanup - collapse
+      await toggle1.click();
+      await expect(body1).not.toBeVisible();
+    }
   });
 
   test('respects user override across fragment updates when articles are expanded', async ({ page }) => {

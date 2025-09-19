@@ -4,7 +4,7 @@ import path from 'path';
 import { chromium, expect as baseExpect, test as base } from '@playwright/test';
 import type { BrowserContext, Page } from '@playwright/test';
 
-const EXTENSION_PATH = path.resolve(__dirname, '..');
+const EXTENSION_PATH = path.resolve(__dirname, '..', 'chrome-sanskrit-dict-ext');
 
 async function createUserDataDir(testId: string) {
   const prefix = path.join(os.tmpdir(), `pw-sanskrit-${testId}-`);

@@ -147,7 +147,7 @@ function restoreAutoSearch(root) {
   'use strict';
 
   var TERM_PATTERN = /dictionary|wörterbuch/i;
-  var LONG_ARTICLE_THRESHOLD = 50;
+  var LONG_ARTICLE_THRESHOLD = 100;
   var dictionaryCache = null;
   var defaultSettingsCache = null;
   var currentSettings = null;
@@ -158,11 +158,21 @@ function restoreAutoSearch(root) {
   var resultStylesInjected = false;
   var articleStates = new WeakMap();
   var settingsGeneration = 0;
+  var toggleHandlerInstalled = false;
+  var mutationObserver = null;
+  var isProcessingMutations = false;
 
   loadSettings();
 
+  // Install handler immediately if document is already ready
+  if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    installGlobalToggleHandler();
+    run(document);
+  }
+
   window.addEventListener('load', function () {
     run(document);
+    installGlobalToggleHandler(); // Call again in case it wasn't installed yet
 
     document.addEventListener('up:fragment:inserted', function (e) {
       var target = (e && e.target && e.target.nodeType) ? e.target : document;
@@ -171,12 +181,92 @@ function restoreAutoSearch(root) {
     }, true);
 
     try {
-      var mo = new MutationObserver(function () {
-        scheduleRun(document);
-      });
-      mo.observe(document.documentElement || document.body, { childList: true, subtree: true });
+      if (!mutationObserver) {
+        mutationObserver = new MutationObserver(function (mutations) {
+          // Ignore mutations if we're currently processing
+          if (isProcessingMutations) return;
+
+          // Check if any mutation is actually relevant (new articles added)
+          var hasRelevantMutation = false;
+          for (var i = 0; i < mutations.length; i++) {
+            var mutation = mutations[i];
+            if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+              // Check if any added node contains result-container
+              for (var j = 0; j < mutation.addedNodes.length; j++) {
+                var node = mutation.addedNodes[j];
+                if (node.nodeType === 1) {
+                  if (node.id === 'result-container' ||
+                      node.querySelector && node.querySelector('#result-container')) {
+                    hasRelevantMutation = true;
+                    break;
+                  }
+                }
+              }
+              if (hasRelevantMutation) break;
+            }
+          }
+
+          if (hasRelevantMutation) {
+            scheduleRun(document);
+          }
+        });
+        mutationObserver.observe(document.documentElement || document.body, { childList: true, subtree: true });
+      }
     } catch (_err2) {}
   }, true);
+
+  // Also install on DOMContentLoaded as a fallback
+  document.addEventListener('DOMContentLoaded', function () {
+    installGlobalToggleHandler();
+  });
+
+  function installGlobalToggleHandler() {
+    if (toggleHandlerInstalled) {
+      return;
+    }
+    toggleHandlerInstalled = true;
+
+    // Handle toggle button clicks
+    document.addEventListener('click', function (ev) {
+      var target = ev.target;
+
+      if (!target) {
+        return;
+      }
+
+      // Check if clicked element is a toggle button
+      if (!target.classList || !target.classList.contains('sd-ext-article-toggle')) {
+        // Not a toggle button
+        return;
+      }
+
+      // Find the parent article
+      var article = target.closest('.sd-ext-article');
+      if (!article) {
+        return;
+      }
+
+      try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (_e0) {}
+      try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e1) {}
+
+      var state = getArticleState(article);
+      var isCollapsed = state && state.collapsed != null ? !!state.collapsed : article.classList.contains('sd-ext-article-collapsed');
+
+      var meta = getArticleDebugMeta(article);
+      logDebug('toggleClick', { collapsed: isCollapsed, meta: meta, generation: settingsGeneration });
+      logDebug('toggleClick', { action: isCollapsed ? 'expand' : 'collapse', meta: meta, generation: settingsGeneration });
+      setArticleCollapsed(article, !isCollapsed, true);
+      var metaAfter = getArticleDebugMeta(article);
+      logDebug('toggleComplete', { action: isCollapsed ? 'expand' : 'collapse', meta: metaAfter, generation: settingsGeneration });
+    }, true);
+  }
+
+  function ensureToggleHandler(article, toggle) {
+    // Just mark the toggle as ready - the global handler will handle clicks
+    if (toggle && toggle.dataset) {
+      toggle.dataset.sdToggleReady = '1';
+    }
+  }
 
   function loadSettings() {
     var defaults = getDefaultSettings(document);
@@ -249,7 +339,13 @@ function restoreAutoSearch(root) {
       scheduled = false;
       var target = pendingRoot && pendingRoot.nodeType ? pendingRoot : document;
       pendingRoot = null;
+      // Set flag to prevent mutation observer from triggering during our changes
+      isProcessingMutations = true;
       run(target);
+      // Reset flag after a short delay to allow DOM to settle
+      setTimeout(function() {
+        isProcessingMutations = false;
+      }, 10);
     }, 120);
   }
 
@@ -412,7 +508,8 @@ function restoreAutoSearch(root) {
         preselectedDictionaries: pre,
         disableAutosearch: true,
         mergeResults: true,
-        minimizeLongArticles: true
+        minimizeLongArticles: true,
+        showToggles: true
       };
     }
     return {
@@ -472,13 +569,15 @@ function restoreAutoSearch(root) {
     var disable = (raw && typeof raw.disableAutosearch === 'boolean') ? raw.disableAutosearch : defaults.disableAutosearch;
     var merge = (raw && typeof raw.mergeResults === 'boolean') ? raw.mergeResults : defaults.mergeResults;
     var minimize = (raw && typeof raw.minimizeLongArticles === 'boolean') ? raw.minimizeLongArticles : defaults.minimizeLongArticles;
+    var showToggles = (raw && typeof raw.showToggles === 'boolean') ? raw.showToggles : defaults.showToggles;
 
     return {
       dictionaryOrder: order,
       preselectedDictionaries: preselected,
       disableAutosearch: disable,
       mergeResults: merge,
-      minimizeLongArticles: minimize
+      minimizeLongArticles: minimize,
+      showToggles: showToggles
     };
   }
 
@@ -490,7 +589,8 @@ function restoreAutoSearch(root) {
       preselectedDictionaries: Array.isArray(newSettings.preselectedDictionaries) ? newSettings.preselectedDictionaries.slice() : [],
       disableAutosearch: !!newSettings.disableAutosearch,
       mergeResults: !!newSettings.mergeResults,
-      minimizeLongArticles: !!newSettings.minimizeLongArticles
+      minimizeLongArticles: !!newSettings.minimizeLongArticles,
+      showToggles: newSettings.showToggles !== undefined ? !!newSettings.showToggles : true
     };
     if (changed) settingsGeneration += 1;
   }
@@ -501,7 +601,8 @@ function restoreAutoSearch(root) {
       arraysEqual(a.preselectedDictionaries, b.preselectedDictionaries) &&
       a.disableAutosearch === b.disableAutosearch &&
       a.mergeResults === b.mergeResults &&
-      a.minimizeLongArticles === b.minimizeLongArticles;
+      a.minimizeLongArticles === b.minimizeLongArticles &&
+      a.showToggles === b.showToggles;
   }
 
   function arraysEqual(a, b) {
@@ -690,6 +791,14 @@ function restoreAutoSearch(root) {
     } catch (_err) {}
   }
 
+  function logConsole(label, payload) {
+    try {
+      if (window.console && typeof window.console.log === 'function') {
+        window.console.log('[SanskritExt]', label, payload || {});
+      }
+    } catch (_err) {}
+  }
+
   function getDirectArticles(container) {
     var list = [];
     if (!container) return list;
@@ -727,6 +836,7 @@ function restoreAutoSearch(root) {
     if (!article || article.nodeType !== 1) return 0;
 
     var initGen = article.dataset ? article.dataset.sdInitGen : null;
+
     if (initGen && String(initGen) === String(settingsGeneration) && articleStates.has(article)) {
       return 0;
     }
@@ -734,6 +844,8 @@ function restoreAutoSearch(root) {
     if (article.dataset) {
       try { article.dataset.sdInitGen = String(settingsGeneration); } catch (_eSetGen) {}
     }
+
+    var debugMeta = getArticleDebugMeta(article);
 
     if (article.classList && !article.classList.contains('sd-ext-article')) {
       article.classList.add('sd-ext-article');
@@ -760,25 +872,45 @@ function restoreAutoSearch(root) {
         body.appendChild(contentNodes[i]);
       }
 
-      toggle = document.createElement('button');
-      toggle.type = 'button';
-      toggle.className = 'sd-ext-article-toggle';
-      toggle.textContent = '-';
-      toggle.setAttribute('aria-label', 'Collapse dictionary entry');
-      toggle.setAttribute('aria-expanded', 'true');
-      toggle.addEventListener('click', function (ev) {
-        try { if (ev && ev.preventDefault) ev.preventDefault(); } catch (_e0) {}
-        try { if (ev && ev.stopPropagation) ev.stopPropagation(); } catch (_e1) {}
-        var state = getArticleState(article);
-        var isCollapsed = state && state.collapsed != null ? !!state.collapsed : article.classList.contains('sd-ext-article-collapsed');
-        logDebug('toggleClick', { collapsed: isCollapsed, id: article && article.dataset ? article.dataset.sdArticleId : undefined, generation: settingsGeneration });
-        setArticleCollapsed(article, !isCollapsed, true);
-      }, false);
+      // Only create toggle button if showToggles is enabled or if minimizeLongArticles is enabled
+      if (currentSettings && (currentSettings.showToggles || currentSettings.minimizeLongArticles)) {
+        toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'sd-ext-article-toggle';
+        toggle.textContent = '-';
+        toggle.setAttribute('aria-label', 'Collapse dictionary entry');
+        toggle.setAttribute('aria-expanded', 'true');
+        article.appendChild(toggle);
+      }
 
-      article.appendChild(toggle);
       article.appendChild(body);
       for (var j = 0; j < footerNodes.length; j++) {
         article.appendChild(footerNodes[j]);
+      }
+    }
+
+    // Show/hide toggle based on settings
+    if (currentSettings && (currentSettings.showToggles || currentSettings.minimizeLongArticles)) {
+      // Make sure toggle exists
+      if (!toggle) {
+        toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'sd-ext-article-toggle';
+        toggle.textContent = '-';
+        toggle.setAttribute('aria-label', 'Collapse dictionary entry');
+        toggle.setAttribute('aria-expanded', 'true');
+        // Insert toggle as first child
+        article.insertBefore(toggle, article.firstChild);
+      }
+      if (toggle.style) {
+        toggle.style.display = '';
+      }
+      // Ensure toggle has event listener
+      ensureToggleHandler(article, toggle);
+    } else {
+      // Hide toggle if it exists
+      if (toggle && toggle.style) {
+        toggle.style.display = 'none';
       }
     }
 
@@ -813,11 +945,14 @@ function restoreAutoSearch(root) {
     var body = article.querySelector(':scope > .sd-ext-article-body');
     if (!body) return;
 
-    logDebug('setArticleCollapsed', { collapsed: collapsed, userAction: !!userAction, state: state });
+    var meta = getArticleDebugMeta(article);
+    logDebug('setArticleCollapsed', { collapsed: collapsed, userAction: !!userAction, state: state, meta: meta });
+    logDebug('collapse:start', { collapsed: collapsed, userAction: !!userAction, meta: meta });
 
     var alreadyCollapsed = article.classList && article.classList.contains('sd-ext-article-collapsed');
     if (!userAction && state && state.collapsed === collapsed && alreadyCollapsed === collapsed) {
       updateArticleToggle(article, collapsed);
+      logDebug('collapse:noop', { collapsed: collapsed, meta: meta });
       return;
     }
 
@@ -844,7 +979,8 @@ function restoreAutoSearch(root) {
     }
 
     updateArticleToggle(article, collapsed);
-    logDebug('setArticleCollapsed:done', { collapsed: collapsed, userOverride: state && state.userOverride });
+    logDebug('setArticleCollapsed:done', { collapsed: collapsed, userOverride: state && state.userOverride, meta: meta });
+    logDebug('collapse:end', { collapsed: collapsed, userOverride: state && state.userOverride, meta: meta });
   }
 
   function updateArticleToggle(article, collapsed) {
@@ -854,6 +990,39 @@ function restoreAutoSearch(root) {
     toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
     toggle.setAttribute('aria-label', collapsed ? 'Expand dictionary entry' : 'Collapse dictionary entry');
   }
+
+  function getArticleDebugMeta(article) {
+    var meta = { id: 'unknown', dictionaryCode: null, index: -1, containerId: null };
+    if (!article || article.nodeType !== 1) return meta;
+    var container = article.parentElement;
+    if (container && container.id) {
+      meta.containerId = container.id;
+      meta.dictionaryCode = extractResultCode(container.id) || null;
+    }
+    var index = -1;
+    if (container) {
+      var articles = getDirectArticles(container);
+      for (var i = 0; i < articles.length; i++) {
+        if (articles[i] === article) {
+          index = i;
+          break;
+        }
+      }
+    }
+    meta.index = index;
+    var labelParts = [];
+    if (meta.dictionaryCode) labelParts.push(meta.dictionaryCode);
+    else if (meta.containerId) labelParts.push(meta.containerId);
+    if (index >= 0) labelParts.push(String(index));
+    meta.id = labelParts.length ? labelParts.join('#') : 'article';
+    if (article.dataset) {
+      try { article.dataset.sdArticleId = meta.id; } catch (_e1) {}
+      try { article.dataset.sdArticleDict = meta.dictionaryCode || ''; } catch (_e2) {}
+    }
+    return meta;
+  }
+
+  // Removed duplicate click handler - now handled by installGlobalToggleHandler
 
   function countApproxLines(element) {
     if (!element) return 0;
@@ -872,7 +1041,7 @@ function restoreAutoSearch(root) {
     if (resultStylesInjected) return;
     var css = '' +
       '.sd-ext-article { position: relative; padding-left: 2.25rem; }' +
-      '.sd-ext-article .sd-ext-article-toggle { position: absolute; left: 0.6rem; top: 0.6rem; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid rgba(0,0,0,0.15); background: #f5f5f5; color: #333; font-size: 1rem; line-height: 1.3rem; padding: 0; text-align: center; cursor: pointer; }' +
+      '.sd-ext-article .sd-ext-article-toggle { position: absolute; left: 0.6rem; top: 0.6rem; width: 1.5rem; height: 1.5rem; border-radius: 999px; border: 1px solid rgba(0,0,0,0.15); background: #f5f5f5; color: #333; font-size: 1rem; line-height: 1.3rem; padding: 0; text-align: center; cursor: pointer; z-index: 5; pointer-events: auto; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }' +
       '.sd-ext-article .sd-ext-article-toggle:focus { outline: 2px solid #4a90e2; outline-offset: 2px; }' +
       '.sd-ext-article .sd-ext-article-body { margin-top: 0.25rem; }' +
       '.sd-ext-article.sd-ext-article-collapsed .sd-ext-article-body { display: none !important; }' +
@@ -911,16 +1080,5 @@ function restoreAutoSearch(root) {
       return id.replace(/^result-/, '');
     }
     return id.slice(idx + 1);
-  }
-
-  function logDebug(label, payload) {
-    try {
-      if (!window || !window.localStorage) return;
-      var enabled = window.localStorage.getItem('sdExtDebug');
-      if (enabled !== '1' && enabled !== 'true') return;
-      if (window.console && typeof window.console.log === 'function') {
-        window.console.log('[SanskritExt]', label, payload || {});
-      }
-    } catch (_err) {}
   }
 })();

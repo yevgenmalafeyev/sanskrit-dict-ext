@@ -19,7 +19,8 @@
     preselected: new Set(),
     disableAutosearch: true,
     mergeResults: true,
-    minimizeLongArticles: true
+    minimizeLongArticles: true,
+    showToggles: true
   };
 
   var els = {};
@@ -45,6 +46,7 @@
     els.autosearch = document.getElementById('disable-autosearch');
     els.mergeResults = document.getElementById('merge-results');
     els.minimizeLong = document.getElementById('minimize-long');
+    els.showToggles = document.getElementById('show-toggles');
     els.status = document.getElementById('status');
 
     attachEventHandlers();
@@ -80,7 +82,29 @@
     if (els.minimizeLong) {
       els.minimizeLong.addEventListener('change', function () {
         state.minimizeLongArticles = !!els.minimizeLong.checked;
+        // When minimize is enabled, force show toggles to be checked
+        if (state.minimizeLongArticles) {
+          state.showToggles = true;
+          if (els.showToggles) {
+            els.showToggles.checked = true;
+            els.showToggles.disabled = true;
+          }
+        } else {
+          // When minimize is disabled, allow show toggles to be toggled
+          if (els.showToggles) {
+            els.showToggles.disabled = false;
+          }
+        }
         saveSettings();
+      });
+    }
+    if (els.showToggles) {
+      els.showToggles.addEventListener('change', function () {
+        // Only allow change if minimize is not checked
+        if (!state.minimizeLongArticles) {
+          state.showToggles = !!els.showToggles.checked;
+          saveSettings();
+        }
       });
     }
   }
@@ -121,7 +145,8 @@
       preselectedDictionaries: Array.from(state.preselected),
       disableAutosearch: state.disableAutosearch,
       mergeResults: state.mergeResults,
-      minimizeLongArticles: state.minimizeLongArticles
+      minimizeLongArticles: state.minimizeLongArticles,
+      showToggles: state.showToggles
     };
 
     if (Object.prototype.hasOwnProperty.call(changes, 'dictionaryOrder')) {
@@ -144,6 +169,10 @@
       current.minimizeLongArticles = !!(changes.minimizeLongArticles && changes.minimizeLongArticles.newValue);
       updated = true;
     }
+    if (Object.prototype.hasOwnProperty.call(changes, 'showToggles')) {
+      current.showToggles = !!(changes.showToggles && changes.showToggles.newValue);
+      updated = true;
+    }
 
     if (updated) {
       applySettings(sanitizeSettings(current), { silent: true });
@@ -163,12 +192,20 @@
     state.minimizeLongArticles = typeof settings.minimizeLongArticles === 'boolean'
       ? settings.minimizeLongArticles
       : true;
+    state.showToggles = typeof settings.showToggles === 'boolean'
+      ? settings.showToggles
+      : true;
 
     renderOrderList();
     renderPreselectList();
     if (els.autosearch) els.autosearch.checked = state.disableAutosearch;
     if (els.mergeResults) els.mergeResults.checked = state.mergeResults;
     if (els.minimizeLong) els.minimizeLong.checked = state.minimizeLongArticles;
+    if (els.showToggles) {
+      els.showToggles.checked = state.showToggles;
+      // Disable the checkbox if minimize is enabled
+      els.showToggles.disabled = state.minimizeLongArticles;
+    }
 
     if (!opts.silent) {
       showStatus('Settings loaded.');
@@ -333,7 +370,8 @@
       preselectedDictionaries: Array.from(state.preselected),
       disableAutosearch: state.disableAutosearch,
       mergeResults: state.mergeResults,
-      minimizeLongArticles: state.minimizeLongArticles
+      minimizeLongArticles: state.minimizeLongArticles,
+      showToggles: state.showToggles
     };
 
     pendingStorageEvents += 1;
@@ -359,7 +397,8 @@
       preselectedDictionaries: sanitizeCodes(getDefaultPreselected()),
       disableAutosearch: true,
       mergeResults: true,
-      minimizeLongArticles: true
+      minimizeLongArticles: true,
+      showToggles: true
     };
   }
 
@@ -370,7 +409,8 @@
       preselectedDictionaries: sanitizeCodes(asArray(raw.preselectedDictionaries || defaults.preselectedDictionaries)),
       disableAutosearch: typeof raw.disableAutosearch === 'boolean' ? raw.disableAutosearch : defaults.disableAutosearch,
       mergeResults: typeof raw.mergeResults === 'boolean' ? raw.mergeResults : defaults.mergeResults,
-      minimizeLongArticles: typeof raw.minimizeLongArticles === 'boolean' ? raw.minimizeLongArticles : defaults.minimizeLongArticles
+      minimizeLongArticles: typeof raw.minimizeLongArticles === 'boolean' ? raw.minimizeLongArticles : defaults.minimizeLongArticles,
+      showToggles: typeof raw.showToggles === 'boolean' ? raw.showToggles : defaults.showToggles
     };
   }
 
